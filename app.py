@@ -3,53 +3,61 @@ def calculate_ssc_marks(url, pos_mark, neg_mark):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
     }
     try:
-        # 1. URL fetch karo
+        # 1. Fetch the URL content
         res = requests.get(url, headers=headers, timeout=15)
         soup = BeautifulSoup(res.text, 'html.parser')
+
+        # 2. Smart Searching Strategy
+        # Hum 3 sabse common class names check karenge jo SSC use karta hai.
+        question_blocks = soup.find_all('div', class_='question-pnl')      # Style 1
+        if not question_blocks:
+            question_blocks = soup.find_all('table', class_='menu-tbl')     # Style 2
+        if not question_blocks:
+            question_blocks = soup.find_all('table', class_='question-tabl') # Style 3
         
-        # 2. Universal Search: Ab hum kisi specific class par depend nahi karenge
-        # Hum saari tables dhundenge aur check karenge ki kis table mein "Right Answer" likha hai
-        blocks = soup.find_all('table') 
-        
+        # 3. Final Check: Agar in teeno me se kuch nahi mila
+        if not question_blocks:
+            return None, "Error: Hum is answer key ka format nahi padh paa rahe hain. Lagta hai SSC ne layout poori tarah badal diya hai."
+
+        # 4. Calculation Engine
         correct, wrong, blank = 0, 0, 0
         question_data = []
 
-        for table in blocks:
-            # Check if this table contains a question
-            if "Right Answer" in table.text and "Chosen Option" in table.text:
-                
-                # Right Answer nikalna
-                right_ans = ""
-                rows = table.find_all('tr')
-                for row in rows:
-                    if "Right Answer" in row.text:
-                        # Right answer usually ek specific td mein hota hai
-                        right_ans = row.find_all('td')[1].text.strip().split('.')[0]
-                
-                # Chosen Option nikalna
-                chosen_ans = "--"
-                for row in rows:
-                    if "Chosen Option" in row.text:
-                        chosen_ans = row.find_all('td')[1].text.strip()
-                        break
-                
-                # Compare
-                if chosen_ans == "--":
-                    blank += 1
-                    question_data.append("Blank")
-                elif chosen_ans == right_ans:
-                    correct += 1
-                    question_data.append("Correct")
-                else:
-                    wrong += 1
-                    question_data.append("Wrong")
+        for block in question_blocks:
+            # Right Answer (Hamesha 'rightAns' class me hota hai)
+            right_ans_elem = block.find('td', class_='rightAns')
+            if not right_ans_elem: continue # Agar ye question block nahi hai, toh skip karo
+            
+            right_ans = right_ans_elem.text.strip()[0]
+            
+            # Chosen Option
+            chosen_ans = "--"
+            tds = block.find_all('td')
+            for i, td in enumerate(tds):
+                if "Chosen Option" in td.text:
+                    if i + 1 < len(tds):
+                        chosen_ans = tds[i+1].text.strip()
+                    break
+            
+            # Compare
+            if chosen_ans in ["--", ""]:
+                blank += 1
+                question_data.append("Blank")
+            elif chosen_ans == right_ans:
+                correct += 1
+                question_data.append("Correct")
+            else:
+                wrong += 1
+                question_data.append("Wrong")
         
-        # Agar koi bhi question nahi mila
+        # Ek aur Safety Check
         if len(question_data) == 0:
-            return None, "No questions found! SSC ne site ka layout change kar diya hai."
+            return None, "Error: Lagta hai page load hua par usme questions nahi mile. Link expire ho sakti hai."
 
         score = (correct * pos_mark) - (wrong * neg_mark)
         return (correct, wrong, blank, round(score, 2), question_data), "Success"
         
+    except requests.exceptions.Timeout:
+        return None, "Error: SSC server response nahi de raha hai. Thodi der baad try karein."
     except Exception as e:
-        return None, str(e)
+        return None, f"Technical Error: {e}"
